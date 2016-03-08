@@ -9,7 +9,27 @@ Version: 0.2.3
 License: GPLv2
 */
 
+
+
+/*
+
+This fork allows for the showing of the searched title instead of ID alone.
+Includes a clear button.
+
+You must pass ` 'include_post_title'  => true ` to get the above functionality.
+
+NB: Not well tested beyond the current implementation!
+
+*/
+
 function cmb2_post_search_render_field( $field, $escaped_value, $object_id, $object_type, $field_type ) {
+	if ( $field->args('include_post_title') ) {
+		$title =  !empty($field->escaped_value) ?  get_the_title($field->escaped_value) : "";
+		echo "<label class='attached-post-title' for='" . $field->args('id') . "'>" . $title . "</label>";
+		if( !empty($title) ) {
+			echo '<div id="find-posts-clear"  class="dashicons cmb2-post-remove-button dashicons-trash"></div>';
+		}
+	}
 	echo $field_type->input( array(
 		'data-search' => json_encode( array(
 			'posttype'   => $field->args( 'post_type' ),
@@ -17,8 +37,11 @@ function cmb2_post_search_render_field( $field, $escaped_value, $object_id, $obj
 			'selectbehavior' => 'replace' == $field->args( 'select_behavior' ) ? 'replace' : 'add',
 			'errortxt'   => esc_attr( $field_type->_text( 'error_text', __( 'An error has occurred. Please reload the page and try again.' ) ) ),
 			'findtxt'    => esc_attr( $field_type->_text( 'find_text', __( 'Find Posts or Pages' ) ) ),
+			'includeposttitle'  => false == $field->args( 'include_post_title' ) ? false : true,
 		) ),
 	) );
+
+
 }
 add_action( 'cmb2_render_post_search_text', 'cmb2_post_search_render_field', 10, 5 );
 
@@ -84,13 +107,14 @@ function cmb2_post_search_render_js(  $cmb_id, $object_id, $object_type, $cmb ) 
 			$overlay   : false,
 			$idInput   : false,
 			$checked   : false,
+			$titleLabel: false,
 
 			events : {
 				'keypress .find-box-search :input' : 'maybeStartSearch',
 				'keyup #find-posts-input'  : 'escClose',
 				'click #find-posts-submit' : 'selectPost',
 				'click #find-posts-search' : 'send',
-				'click #find-posts-close'  : 'close',
+				'click #find-posts-close'  : 'close'
 			},
 
 			initialize: function() {
@@ -128,6 +152,8 @@ function cmb2_post_search_render_js(  $cmb_id, $object_id, $object_type, $cmb ) 
 				}
 
 				this.$overlay.show();
+
+				$('#find-posts-clear').remove();
 
 				// Pull some results up by default
 				this.send();
@@ -186,17 +212,19 @@ function cmb2_post_search_render_js(  $cmb_id, $object_id, $object_type, $cmb ) 
 				this.$checked = $( '#find-posts-response input[type="' + this.selecttype + '"]:checked' );
 
 				var checked = this.$checked.map(function() { return this.value; }).get();
+				var title = this.$checked.parents('tr').find('label').text();
 
 				if ( ! checked.length ) {
 					this.close();
 					return;
 				}
 
-				this.handleSelected( checked );
+				this.handleSelected( checked, title );
 			},
 
-			handleSelected: function( checked ) {
+			handleSelected: function( checked, title ) {
 				checked = checked.join( ', ' );
+				title = title;
 
 				if ( 'add' === this.selectbehavior ) {
 					var existing = this.$idInput.val();
@@ -206,8 +234,24 @@ function cmb2_post_search_render_js(  $cmb_id, $object_id, $object_type, $cmb ) 
 				}
 
 				this.$idInput.val( checked );
+
+				if ( true === this.includeposttitle && title.length ) {
+
+					if ( 'add' === this.selectbehavior ) {
+						var existingTitle = this.$titleLabel.text();
+						if ( existingTitle ) {
+							title = existingTitle + ', ' + title;
+						}
+					}
+
+					this.$titleLabel.text(title);
+					// Add a clear icon (because the input field is masked by the title)
+					$('.dashicons-search', '.cmb-td' ).after( '<div id="find-posts-clear"  class="dashicons cmb2-post-remove-button dashicons-trash"></div>');
+				}
+
 				this.close();
-			}
+			},
+
 
 		});
 
@@ -219,12 +263,28 @@ function cmb2_post_search_render_js(  $cmb_id, $object_id, $object_type, $cmb ) 
 
 		window.cmb2_post_search.openSearch = function( evt ) {
 			var search = window.cmb2_post_search;
-
 			search.$idInput = $( evt.currentTarget ).parents( '.cmb-type-post-search-text' ).find( '.cmb-td input[type="text"]' );
 			// Setup our variables from the field data
 			$.extend( search, search.$idInput.data( 'search' ) );
 
+			if ( true === search.includeposttitle ) {
+				search.$titleLabel = $( evt.currentTarget ).parents( '.cmb-type-post-search-text' ).find( '.cmb-td .attached-post-title' );
+			}
+
 			search.trigger( 'open' );
+		};
+
+		window.cmb2_post_search.clear = function ( ) {
+			var $this = $( this );
+
+			//var search = window.cmb2_post_search;
+//attached-post-title
+			$( '.cmb-type-post-search-text .cmb-td input[type="text"]' ).val('')
+				.parents().find('.attached-post-title').text('')
+				.end().find('#find-posts-clear').remove();
+
+			console.log('hi there. Clearing. $this', $this);
+			//console.log('hi there. Clearing. search.$titleLabel', search.$titleLabel);
 		};
 
 		window.cmb2_post_search.addSearchButtons = function() {
@@ -235,16 +295,22 @@ function cmb2_post_search_render_js(  $cmb_id, $object_id, $object_type, $cmb ) 
 
 		$( '.cmb-type-post-search-text .cmb-td input[type="text"]' ).each( window.cmb2_post_search.addSearchButtons );
 
-		$( '.cmb2-wrap' ).on( 'click', '.cmb-type-post-search-text .cmb-td .dashicons-search', window.cmb2_post_search.openSearch );
+		$( '.cmb2-wrap' )
+			.on( 'click', '.cmb-type-post-search-text .cmb-td .dashicons-search', window.cmb2_post_search.openSearch )
+			.on( 'click', '.cmb-type-post-search-text .cmb-td .attached-post-title', window.cmb2_post_search.openSearch )
+			.on( 'click', '.cmb-type-post-search-text .cmb2-post-remove-button', window.cmb2_post_search.clear );
+
 		$( 'body' ).on( 'click', '.ui-find-overlay', window.cmb2_post_search.closeSearch );
 
 	});
 	</script>
 	<style type="text/css" media="screen">
-		.cmb2-post-search-button {
+		.cmb2-post-search-button, .cmb2-post-remove-button {
 			color: #999;
 			margin: .3em 0 0 2px;
 			cursor: pointer;
+		}
+		.cmb2-post-remove-button {
 		}
 	</style>
 	<?php
@@ -287,3 +353,5 @@ function cmb2_post_search_wp_ajax_find_posts() {
 	}
 }
 add_action( 'admin_init', 'cmb2_post_search_wp_ajax_find_posts' );
+
+
